@@ -1,4 +1,4 @@
--- language: Lua (Luau), file: redj03n_fruit_v2.lua
+-- language: Lua (Luau), file: bloxy.lua
 -- RedJ03N · Fruit Scanner v2 — premium GUI
 
 if getgenv and getgenv().RJFS2 then
@@ -12,7 +12,7 @@ if getgenv then getgenv().RJFS2 = true end
 pcall(function()
     local q = queue_on_teleport or queueteleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
     if q then
-        q('loadstring(game:HttpGet("https://raw.githubusercontent.com/redjo3n/main.lua/main/bloxfruit.lua"))()')
+        q('loadstring(game:HttpGet("https://raw.githubusercontent.com/redjo3n/main.lua/main/bloxy.lua"))()')
     end
 end)
 
