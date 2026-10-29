@@ -1,5 +1,5 @@
 -- language: Lua (Luau), file: redj03n_esp_pro.lua
--- RedJ03N · ESP Pro — Fust Survival / universal
+-- RedJ03N · ESP Pro — Ghostface toggle + scrollable tabs
 
 if getgenv and getgenv().RJ_ESPPro then
     pcall(function()
@@ -15,12 +15,10 @@ local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
 local TW = game:GetService("TweenService")
 local LT = game:GetService("Lighting")
-local SG = game:GetService("StarterGui")
 
 local LP = Players.LocalPlayer
 local CAM = workspace.CurrentCamera
 
--- THEME
 local C = {
     bg      = Color3.fromRGB(14, 18, 32),
     panel   = Color3.fromRGB(23, 28, 46),
@@ -42,7 +40,6 @@ local FM = Enum.Font.GothamMedium
 local FS = Enum.Font.GothamSemibold
 local FC = Enum.Font.Code
 
--- STATE
 local S = {
     enabled      = false,
     box          = true,
@@ -64,33 +61,76 @@ local S = {
 
 local PD = {}
 
--- HELPERS
 local function getHum(p)
     if not p.Character then return nil end
     return p.Character:FindFirstChildOfClass("Humanoid")
 end
-
 local function getRoot(p)
     if not p.Character then return nil end
     return p.Character:FindFirstChild("HumanoidRootPart")
 end
-
 local function getHead(p)
     if not p.Character then return nil end
     return p.Character:FindFirstChild("Head")
 end
-
-local function dist3(a, b)
-    return (a - b).Magnitude
-end
-
+local function dist3(a, b) return (a - b).Magnitude end
 local function isTeammate(p)
     if not S.teamCheck then return false end
     if not p.Team or not LP.Team then return false end
     return p.Team == LP.Team
 end
 
+-- ============================================================
+-- GHOSTFACE DRAWING HELPER
+-- ============================================================
+local function drawGhostface(container, size)
+    local face = Instance.new("Frame", container)
+    face.Size = UDim2.new(0, size, 0, math.floor(size * 1.15))
+    face.Position = UDim2.new(0.5, -size/2, 0.5, -math.floor(size * 1.15)/2)
+    face.BackgroundColor3 = C.white
+    face.BorderSizePixel = 0
+    Instance.new("UICorner", face).CornerRadius = UDim.new(0.5, 0)
+
+    local stroke = Instance.new("UIStroke", face)
+    stroke.Color = Color3.fromRGB(15, 15, 20)
+    stroke.Thickness = 1.5
+
+    local eyeW = math.max(2, math.floor(size * 0.16))
+    local eyeH = math.max(3, math.floor(size * 0.32))
+    local eyeY = 0.26
+
+    local eyeL = Instance.new("Frame", face)
+    eyeL.Size = UDim2.new(0, eyeW, 0, eyeH)
+    eyeL.Position = UDim2.new(0.5, -math.floor(size * 0.26), eyeY, 0)
+    eyeL.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    eyeL.BorderSizePixel = 0
+    eyeL.Rotation = -18
+    Instance.new("UICorner", eyeL).CornerRadius = UDim.new(1, 0)
+
+    local eyeR = Instance.new("Frame", face)
+    eyeR.Size = UDim2.new(0, eyeW, 0, eyeH)
+    eyeR.Position = UDim2.new(0.5, math.floor(size * 0.10), eyeY, 0)
+    eyeR.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    eyeR.BorderSizePixel = 0
+    eyeR.Rotation = 18
+    Instance.new("UICorner", eyeR).CornerRadius = UDim.new(1, 0)
+
+    local mouthW = math.max(3, math.floor(size * 0.14))
+    local mouthH = math.max(5, math.floor(size * 0.35))
+
+    local mouth = Instance.new("Frame", face)
+    mouth.Size = UDim2.new(0, mouthW, 0, mouthH)
+    mouth.Position = UDim2.new(0.5, -math.floor(mouthW/2), 0.58, 0)
+    mouth.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    mouth.BorderSizePixel = 0
+    Instance.new("UICorner", mouth).CornerRadius = UDim.new(1, 0)
+
+    return face
+end
+
+-- ============================================================
 -- ESP MANAGEMENT
+-- ============================================================
 local function removeESP(p)
     local d = PD[p]
     if not d then return end
@@ -322,7 +362,77 @@ local blur = Instance.new("BlurEffect", LT)
 blur.Size = 0
 blur.Enabled = false
 
+-- ============================================================
+-- MINI GHOSTFACE GUI
+-- ============================================================
+local miniGui = Instance.new("ScreenGui")
+miniGui.Name = "RJ_ESP_Mini"
+miniGui.Parent = game.CoreGui
+miniGui.ResetOnSpawn = false
+miniGui.DisplayOrder = 1003
+
+local MiniGhost = Instance.new("TextButton", miniGui)
+MiniGhost.Size = UDim2.new(0, 52, 0, 52)
+MiniGhost.Position = UDim2.new(0, 20, 0, 60)
+MiniGhost.BackgroundColor3 = C.bg
+MiniGhost.BackgroundTransparency = 0.1
+MiniGhost.BorderSizePixel = 0
+MiniGhost.Text = ""
+MiniGhost.AutoButtonColor = false
+MiniGhost.Visible = false
+Instance.new("UICorner", MiniGhost).CornerRadius = UDim.new(1, 0)
+local mgStroke = Instance.new("UIStroke", MiniGhost)
+mgStroke.Color = C.purple
+mgStroke.Thickness = 1.5
+mgStroke.Transparency = 0.3
+
+drawGhostface(MiniGhost, 32)
+
+-- make mini draggable
+local miniDrag = false
+local miniStart
+local miniStartPos
+MiniGhost.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        miniDrag = true
+        miniStart = input.Position
+        miniStartPos = MiniGhost.Position
+        local conn
+        conn = input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                miniDrag = false
+                conn:Disconnect()
+            end
+        end)
+    end
+end)
+UIS.InputChanged:Connect(function(input)
+    if miniDrag and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - miniStart
+        MiniGhost.Position = UDim2.new(
+            miniStartPos.X.Scale, miniStartPos.X.Offset + delta.X,
+            miniStartPos.Y.Scale, miniStartPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- pulse animation
+task.spawn(function()
+    while MiniGhost.Parent do
+        if MiniGhost.Visible then
+            TW:Create(mgStroke, TweenInfo.new(1.2), {Transparency = 0.7}):Play()
+            task.wait(1.2)
+            TW:Create(mgStroke, TweenInfo.new(1.2), {Transparency = 0.1}):Play()
+            task.wait(1.2)
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+-- ============================================================
 -- MAIN GUI
+-- ============================================================
 local gui = Instance.new("ScreenGui")
 gui.Name = "RJ_ESP_Pro"
 gui.Parent = game.CoreGui
@@ -384,7 +494,7 @@ lt.TextSize = 20
 local Title = Instance.new("TextLabel", Header)
 Title.BackgroundTransparency = 1
 Title.Position = UDim2.new(0, 60, 0, 13)
-Title.Size = UDim2.new(1, -140, 0, 22)
+Title.Size = UDim2.new(1, -170, 0, 22)
 Title.Font = FB
 Title.Text = "REDJ03N"
 Title.TextColor3 = C.text
@@ -394,13 +504,38 @@ Title.TextXAlignment = Enum.TextXAlignment.Left
 local Sub = Instance.new("TextLabel", Header)
 Sub.BackgroundTransparency = 1
 Sub.Position = UDim2.new(0, 60, 0, 36)
-Sub.Size = UDim2.new(1, -140, 0, 14)
+Sub.Size = UDim2.new(1, -170, 0, 14)
 Sub.Font = FM
 Sub.Text = "E S P   P R O"
 Sub.TextColor3 = C.cyan
 Sub.TextSize = 9
 Sub.TextXAlignment = Enum.TextXAlignment.Left
 
+-- GHOSTFACE minimize button in header
+local GhostBtn = Instance.new("TextButton", Header)
+GhostBtn.Position = UDim2.new(1, -68, 0, 18)
+GhostBtn.Size = UDim2.new(0, 30, 0, 30)
+GhostBtn.BackgroundColor3 = C.panel2
+GhostBtn.BorderSizePixel = 0
+GhostBtn.Text = ""
+GhostBtn.AutoButtonColor = false
+Instance.new("UICorner", GhostBtn).CornerRadius = UDim.new(0, 8)
+local gbStroke = Instance.new("UIStroke", GhostBtn)
+gbStroke.Color = C.purple
+gbStroke.Thickness = 1
+gbStroke.Transparency = 0.5
+drawGhostface(GhostBtn, 18)
+
+GhostBtn.MouseEnter:Connect(function()
+    TW:Create(gbStroke, TweenInfo.new(0.15), {Transparency = 0}):Play()
+    TW:Create(GhostBtn, TweenInfo.new(0.15), {BackgroundColor3 = C.panel3}):Play()
+end)
+GhostBtn.MouseLeave:Connect(function()
+    TW:Create(gbStroke, TweenInfo.new(0.15), {Transparency = 0.5}):Play()
+    TW:Create(GhostBtn, TweenInfo.new(0.15), {BackgroundColor3 = C.panel2}):Play()
+end)
+
+-- Close button
 local CloseBtn = Instance.new("TextButton", Header)
 CloseBtn.Position = UDim2.new(1, -34, 0, 18)
 CloseBtn.Size = UDim2.new(0, 26, 0, 26)
@@ -417,6 +552,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     wmGui:Destroy()
     notifGui:Destroy()
     tracerGui:Destroy()
+    miniGui:Destroy()
     blur:Destroy()
 end)
 
@@ -456,16 +592,54 @@ sText.TextColor3 = C.muted
 sText.TextSize = 10
 sText.TextXAlignment = Enum.TextXAlignment.Left
 
+-- ============================================================
+-- MINIMIZE / RESTORE
+-- ============================================================
+local function minimizeToGhost()
+    S.uiVisible = false
+    Main.Visible = false
+    WM.Visible = false
+    MiniGhost.Visible = true
+end
+
+local function restoreFromGhost()
+    S.uiVisible = true
+    Main.Visible = true
+    WM.Visible = true
+    MiniGhost.Visible = false
+end
+
+GhostBtn.MouseButton1Click:Connect(minimizeToGhost)
+MiniGhost.MouseButton1Click:Connect(function()
+    if not miniDrag then
+        restoreFromGhost()
+    end
+end)
+
+-- ============================================================
 -- UI BUILDERS
+-- ============================================================
 local Tabs = {}
 
 local function newTab(name, icon, order)
-    local page = Instance.new("Frame", Content)
-    page.Size = UDim2.new(1, -20, 1, -20)
-    page.Position = UDim2.new(0, 10, 0, 10)
+    local page = Instance.new("ScrollingFrame", Content)
+    page.Size = UDim2.new(1, -12, 1, -12)
+    page.Position = UDim2.new(0, 6, 0, 6)
     page.BackgroundTransparency = 1
     page.Visible = false
     page.BorderSizePixel = 0
+    page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.ScrollBarThickness = 4
+    page.ScrollBarImageColor3 = C.purple
+    page.ScrollingDirection = Enum.ScrollingDirection.Y
+    page.ClipsDescendants = true
+
+    local pad = Instance.new("UIPadding", page)
+    pad.PaddingTop = UDim.new(0, 4)
+    pad.PaddingBottom = UDim.new(0, 12)
+    pad.PaddingLeft = UDim.new(0, 4)
+    pad.PaddingRight = UDim.new(0, 8)
 
     local btn = Instance.new("TextButton", Side)
     btn.Size = UDim2.new(1, -16, 0, 38)
@@ -661,7 +835,9 @@ local function slider(p, label, mn, mx, dflt, y, cb)
     end)
 end
 
+-- ============================================================
 -- TABS
+-- ============================================================
 local ESPT = newTab("ESP", "◉", 0)
 local PlayersT = newTab("Players", "◈", 1)
 local StyleT = newTab("Style", "✦", 2)
@@ -729,7 +905,7 @@ listCount.TextXAlignment = Enum.TextXAlignment.Left
 
 local PlayerList = Instance.new("ScrollingFrame", PlayersT)
 PlayerList.Position = UDim2.new(0, 0, 0, 42)
-PlayerList.Size = UDim2.new(1, 0, 1, -42)
+PlayerList.Size = UDim2.new(1, 0, 0, 320)
 PlayerList.BackgroundColor3 = C.bg
 PlayerList.BorderSizePixel = 0
 PlayerList.ScrollBarThickness = 3
@@ -926,15 +1102,21 @@ button(SettingsT, "RESET ALL ESP", 216, function()
     S.enabled = false
     notify("Reset", "All ESP elements cleared")
 end)
-button(SettingsT, "DESTROY UI", 260, function()
+button(SettingsT, "HIDE TO GHOSTFACE", 260, function()
+    minimizeToGhost()
+end)
+button(SettingsT, "DESTROY UI", 304, function()
     gui:Destroy()
     wmGui:Destroy()
     notifGui:Destroy()
     tracerGui:Destroy()
+    miniGui:Destroy()
     blur:Destroy()
 end)
 
+-- ============================================================
 -- LOOPS
+-- ============================================================
 local frameCount, lastFps, fps = 0, 0, 0
 RunService.RenderStepped:Connect(function()
     frameCount = frameCount + 1
@@ -1041,9 +1223,11 @@ end)
 UIS.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.KeyCode == S.keybind then
-        S.uiVisible = not S.uiVisible
-        Main.Visible = S.uiVisible
-        WM.Visible = S.uiVisible
+        if S.uiVisible then
+            minimizeToGhost()
+        else
+            restoreFromGhost()
+        end
     end
 end)
 
@@ -1087,4 +1271,4 @@ Tabs["ESP"].Btn.BackgroundColor3 = C.panel2
 Tabs["ESP"].Btn.TextColor3 = C.purple
 
 task.wait(0.3)
-notify("RedJ03N ESP Pro", "Loaded · RightShift to hide")
+notify("RedJ03N ESP Pro", "Loaded · Ghostface button to hide")
