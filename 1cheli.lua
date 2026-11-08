@@ -1,5 +1,5 @@
 -- language: Lua (Luau), file: 1cheli.lua
--- RedJ03N · ESP Pro + Loot Vision
+-- RedJ03N · ESP Pro + Loot Vision + Aimbot
 
 if getgenv and getgenv().RJ_ESPPro then
     pcall(function()
@@ -16,10 +16,12 @@ local UIS = game:GetService("UserInputService")
 local TW = game:GetService("TweenService")
 local LT = game:GetService("Lighting")
 local SG = game:GetService("StarterGui")
+local WS = game:GetService("Workspace")
+local CAM = WS.CurrentCamera
 
 local LP = Players.LocalPlayer
-local CAM = workspace.CurrentCamera
 
+-- THEME
 local C = {
     bg      = Color3.fromRGB(14, 18, 32),
     panel   = Color3.fromRGB(23, 28, 46),
@@ -42,7 +44,9 @@ local FM = Enum.Font.GothamMedium
 local FS = Enum.Font.GothamSemibold
 local FC = Enum.Font.Code
 
+-- STATE
 local S = {
+    -- ESP
     enabled      = false,
     box          = true,
     name         = true,
@@ -59,14 +63,26 @@ local S = {
     fullBright   = false,
     keybind      = Enum.KeyCode.RightShift,
     uiVisible    = true,
+    -- Loot
     lootEnabled  = false,
     lootPlayers  = false,
     lootMaxDist  = 1500,
     lootFill     = 0.55,
+    -- AIMBOT
+    aimEnabled   = false,
+    aimSmooth    = 0.25,
+    aimFOV       = 150,
+    aimPart      = "Head",
+    aimPlayers   = true,
+    aimNPCs      = false,
+    aimVisCheck  = true,
+    aimKeybind   = Enum.KeyCode.E,
+    showFOV      = true,
 }
 
 local PD = {}
 local LootCache = {}
+local FOVCircle = nil
 
 -- HELPERS
 local function getHum(p)
@@ -117,6 +133,87 @@ end
 local function lootAnchor(v)
     if v:IsA("BasePart") then return v end
     return v:FindFirstChildWhichIsA("BasePart") or v.PrimaryPart
+end
+
+-- AIMBOT LOGIC
+local function getAimbotTarget()
+    local closest = nil
+    local shortestDist = S.aimFOV
+    local mousePos = UIS:GetMouseLocation()
+
+    local function checkTarget(char, isPlayer)
+        local head = char:FindFirstChild(S.aimPart) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+        if not head then return end
+        local screen, onScreen = CAM:WorldToViewportPoint(head.Position)
+        if not onScreen then return end
+
+        local distToMouse = (Vector2.new(screen.X, screen.Y) - mousePos).Magnitude
+        if distToMouse > S.aimFOV then return end
+
+        if S.aimVisCheck then
+            local rayParams = RaycastParams.new()
+            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+            rayParams.FilterDescendantsInstances = {LP.Character, char}
+            local result = WS:Raycast(CAM.CFrame.Position, (head.Position - CAM.CFrame.Position).Unit * 1000, rayParams)
+            if result then return end -- Wall in the way
+        end
+
+        if distToMouse < shortestDist then
+            shortestDist = distToMouse
+            closest = char
+        end
+    end
+
+    if S.aimPlayers then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP and p.Character and not isTeammate(p) then
+                local hum = getHum(p)
+                if hum and hum.Health > 0 then
+                    checkTarget(p.Character, true)
+                end
+            end
+        end
+    end
+
+    if S.aimNPCs then
+        for _, v in ipairs(WS:GetChildren()) do
+            if v:IsA("Model") and v ~= LP.Character and not Players:GetPlayerFromCharacter(v) then
+                local hum = v:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    checkTarget(v, false)
+                end
+            end
+        end
+    end
+
+    return closest
+end
+
+local function updateAimbot()
+    if not S.aimEnabled then
+        if FOVCircle then FOVCircle.Visible = false end
+        return
+    end
+
+    if S.showFOV and FOVCircle then
+        FOVCircle.Visible = true
+        FOVCircle.Position = UIS:GetMouseLocation()
+        FOVCircle.Radius = S.aimFOV
+        FOVCircle.Color = C.purple
+    elseif FOVCircle then
+        FOVCircle.Visible = false
+    end
+
+    if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) or UIS:IsKeyDown(S.aimKeybind) then
+        local target = getAimbotTarget()
+        if target then
+            local targetPart = target:FindFirstChild(S.aimPart) or target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart")
+            if targetPart then
+                local targetCF = CFrame.new(CAM.CFrame.Position, targetPart.Position)
+                CAM.CFrame = CAM.CFrame:Lerp(targetCF, S.aimSmooth)
+            end
+        end
+    end
 end
 
 -- ESP MANAGEMENT
@@ -678,6 +775,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     tracerGui:Destroy()
     miniGui:Destroy()
     blur:Destroy()
+    if FOVCircle then FOVCircle:Remove() end
 end)
 
 local Side = Instance.new("Frame", Main)
@@ -957,8 +1055,9 @@ end
 local ESPT = newTab("ESP", "◉", 0)
 local PlayersT = newTab("Players", "◈", 1)
 local LootT = newTab("Loot", "◆", 2)
-local StyleT = newTab("Style", "✦", 3)
-local SettingsT = newTab("Settings", "◍", 4)
+local AimT = newTab("Aimbot", "◎", 3)
+local StyleT = newTab("Style", "✦", 4)
+local SettingsT = newTab("Settings", "◍", 5)
 
 -- ESP tab
 section(ESPT, "Master", 0)
@@ -1179,6 +1278,34 @@ button(LootT, "DEBUG — PRINT NAMES", 328, function()
     notify("Debug", "Printed " .. #found .. " objects to console")
 end, true)
 
+-- AIMBOT tab
+section(AimT, "Master", 0)
+toggle(AimT, "Enable Aimbot", "aimEnabled", 24, function(v)
+    if v then
+        notify("Aimbot ON", "Hold Right Mouse or E to lock")
+    else
+        notify("Aimbot OFF", "Unlocked")
+        if FOVCircle then FOVCircle.Visible = false end
+    end
+end)
+
+section(AimT, "Targets", 74)
+toggle(AimT, "Aim Players", "aimPlayers", 98)
+toggle(AimT, "Aim NPCs", "aimNPCs", 134)
+toggle(AimT, "Visibility Check", "aimVisCheck", 170)
+
+section(AimT, "Field of View", 222)
+toggle(AimT, "Show FOV Circle", "showFOV", 246)
+slider(AimT, "FOV Size", 50, 400, S.aimFOV, 290, function(v)
+    S.aimFOV = v
+    if FOVCircle then FOVCircle.Radius = v end
+end)
+
+section(AimT, "Aim Behaviour", 362)
+slider(AimT, "Smoothness", 0.05, 0.8, S.aimSmooth, 386, function(v)
+    S.aimSmooth = v
+end)
+
 -- Style tab
 section(StyleT, "ESP Color", 0)
 
@@ -1293,6 +1420,8 @@ button(SettingsT, "RESET ALL ESP", 216, function()
     for obj, _ in pairs(LootCache) do removeLoot(obj) end
     S.enabled = false
     S.lootEnabled = false
+    S.aimEnabled = false
+    if FOVCircle then FOVCircle.Visible = false end
     notify("Reset", "All ESP cleared")
 end)
 button(SettingsT, "HIDE TO GHOSTFACE", 260, function()
@@ -1305,6 +1434,7 @@ button(SettingsT, "DESTROY UI", 304, function()
     tracerGui:Destroy()
     miniGui:Destroy()
     blur:Destroy()
+    if FOVCircle then FOVCircle:Remove() end
 end)
 
 -- LOOPS
@@ -1420,6 +1550,32 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
+-- Aimbot Loop
+if Drawing then
+    FOVCircle = Drawing.new("Circle")
+    FOVCircle.Thickness = 1.5
+    FOVCircle.NumSides = 60
+    FOVCircle.Radius = S.aimFOV
+    FOVCircle.Filled = false
+    FOVCircle.Transparency = 0.6
+    FOVCircle.Color = C.purple
+    FOVCircle.Visible = false
+    FOVCircle.ZIndex = 999
+end
+
+RunService.RenderStepped:Connect(function()
+    if FOVCircle then
+        if S.aimEnabled and S.showFOV then
+            FOVCircle.Visible = true
+            FOVCircle.Position = UIS:GetMouseLocation()
+            FOVCircle.Radius = S.aimFOV
+        else
+            FOVCircle.Visible = false
+        end
+    end
+    pcall(updateAimbot)
+end)
+
 -- Loot players (separate from loot items)
 task.spawn(function()
     while task.wait(1) do
@@ -1507,4 +1663,4 @@ Tabs["ESP"].Btn.BackgroundColor3 = C.panel2
 Tabs["ESP"].Btn.TextColor3 = C.purple
 
 task.wait(0.3)
-notify("RedJ03N ESP Pro", "Loaded · Loot tab added")
+notify("RedJ03N ESP Pro", "Loaded · Loot + Aimbot added")
