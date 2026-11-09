@@ -1,5 +1,5 @@
 -- language: Lua (Luau), file: 1cheli.lua
--- RedJ03N · ESP Pro + Loot Vision + Aimbot (fixed)
+-- RedJ03N · ESP Pro + Loot + Aimbot + View
 
 if getgenv and getgenv().RJ_ESPPro then
     pcall(function()
@@ -17,54 +17,36 @@ local TW = game:GetService("TweenService")
 local LT = game:GetService("Lighting")
 local WS = game:GetService("Workspace")
 local CAM = WS.CurrentCamera
-
 local LP = Players.LocalPlayer
 
 local C = {
-    bg      = Color3.fromRGB(14, 18, 32),
-    panel   = Color3.fromRGB(23, 28, 46),
-    panel2  = Color3.fromRGB(34, 40, 64),
-    panel3  = Color3.fromRGB(46, 54, 82),
-    purple  = Color3.fromRGB(139, 92, 246),
-    cyan    = Color3.fromRGB(6, 182, 212),
-    gold    = Color3.fromRGB(245, 158, 11),
-    green   = Color3.fromRGB(16, 185, 129),
-    red     = Color3.fromRGB(239, 68, 68),
-    pink    = Color3.fromRGB(236, 72, 153),
-    white   = Color3.fromRGB(248, 250, 252),
-    text    = Color3.fromRGB(226, 232, 240),
-    muted   = Color3.fromRGB(100, 116, 139),
-    off     = Color3.fromRGB(71, 85, 105),
-    orange  = Color3.fromRGB(255, 140, 40),
+    bg=Color3.fromRGB(14,18,32), panel=Color3.fromRGB(23,28,46), panel2=Color3.fromRGB(34,40,64),
+    panel3=Color3.fromRGB(46,54,82), purple=Color3.fromRGB(139,92,246), cyan=Color3.fromRGB(6,182,212),
+    gold=Color3.fromRGB(245,158,11), green=Color3.fromRGB(16,185,129), red=Color3.fromRGB(239,68,68),
+    pink=Color3.fromRGB(236,72,153), white=Color3.fromRGB(248,250,252),
+    text=Color3.fromRGB(226,232,240), muted=Color3.fromRGB(100,116,139), off=Color3.fromRGB(71,85,105),
+    orange=Color3.fromRGB(255,140,40),
 }
-local FB = Enum.Font.GothamBold
-local FM = Enum.Font.GothamMedium
-local FS = Enum.Font.GothamSemibold
-local FC = Enum.Font.Code
+local FB, FM, FS, FC = Enum.Font.GothamBold, Enum.Font.GothamMedium, Enum.Font.GothamSemibold, Enum.Font.Code
 
 local S = {
-    enabled = false, box = true, name = true, health = true, distance = true,
-    tracer = false, teamCheck = false, color = C.red,
-    fillTrans = 0.55, outlineTrans = 0.1, textSize = 12, maxDist = 2000,
-    antiAfk = true, fullBright = false, keybind = Enum.KeyCode.RightShift, uiVisible = true,
-    lootEnabled = false, lootPlayers = false, lootMaxDist = 1500, lootFill = 0.55,
-    -- AIMBOT
-    aimEnabled = false,
-    aimAlways = true,
-    aimSmooth = 0.25,
-    aimFOV = 300,
-    aimPart = "Head",
-    aimPlayers = true,
-    aimNPCs = true,
-    aimVisCheck = false,
-    aimAutoFire = false,
-    aimKeybind = Enum.KeyCode.E,
-    showFOV = true,
+    enabled=false, box=true, name=true, health=true, distance=true, tracer=false,
+    teamCheck=false, color=C.red, fillTrans=0.55, outlineTrans=0.1, textSize=12,
+    maxDist=2000, antiAfk=true, fullBright=false, keybind=Enum.KeyCode.RightShift, uiVisible=true,
+    lootEnabled=false, lootPlayers=false, lootMaxDist=1500, lootFill=0.55,
+    -- Aimbot
+    aimEnabled=false, aimAlways=true, aimSmooth=0.3, aimFOV=300, aimRange=1500,
+    aimPart="Head", aimPlayers=true, aimNPCs=true, aimVisCheck=false, aimAutoFire=false,
+    aimKeybind=Enum.KeyCode.E, showFOV=true,
+    -- View
+    fovEnabled=false, fovValue=70, zoomEnabled=false, zoomDist=30, minZoom=0.5,
 }
 
 local PD = {}
 local LootCache = {}
 local NpcCache = {}
+local cachedAimTarget = nil
+local aimHighlight = nil
 local FOVCircle = nil
 
 local function getHum(p)
@@ -86,16 +68,14 @@ local function isTeammate(p)
     return p.Team == LP.Team
 end
 
--- NPC CACHE — multi-path scan
+-- NPC scan (own throttled loop, single pass)
 local lastNpcScan = 0
 local function scanNPCs()
     local now = tick()
     if now - lastNpcScan < 0.5 then return end
     lastNpcScan = now
-
     local list = {}
     local seen = {}
-
     local function check(v)
         if not v or seen[v] then return end
         seen[v] = true
@@ -107,34 +87,30 @@ local function scanNPCs()
             table.insert(list, v)
         end
     end
-
-    for _, v in ipairs(WS:GetChildren()) do check(v) end
     for _, name in ipairs({"Enemies", "NPCs", "Mobs", "Monsters", "Targets", "Dummies", "Bots", "Hostile"}) do
         local f = WS:FindFirstChild(name)
         if f then
             for _, v in ipairs(f:GetChildren()) do check(v) end
         end
     end
-    for _, folder in ipairs(WS:GetChildren()) do
-        if folder:IsA("Folder") or folder:IsA("Model") then
-            for _, v in ipairs(folder:GetChildren()) do check(v) end
-        end
-    end
-
+    for _, v in ipairs(WS:GetChildren()) do check(v) end
     NpcCache = list
 end
 
--- LOOT
+task.spawn(function()
+    while true do
+        pcall(scanNPCs)
+        task.wait(0.3)
+    end
+end)
+
+-- Loot
 local LOOT_KEYWORDS = {
-    crate = {"crate", "supply"},
-    chest = {"chest", "box", "coffer"},
-    currency = {"cash", "coin", "money", "gem"},
-    weapon = {"gun", "rifle", "pistol", "shotgun", "smg", "sniper", "knife"},
-    other = {"loot", "drop", "pickup", "item", "medkit", "ammo", "armor", "key", "card", "weapon", "tool"},
+    crate={"crate","supply"}, chest={"chest","box","coffer"}, currency={"cash","coin","money","gem"},
+    weapon={"gun","rifle","pistol","shotgun","smg","sniper","knife"},
+    other={"loot","drop","pickup","item","medkit","ammo","armor","key","card","weapon","tool"},
 }
-local LOOT_COLORS = {
-    crate = C.purple, chest = C.orange, currency = C.gold, weapon = C.red, other = C.green,
-}
+local LOOT_COLORS = {crate=C.purple, chest=C.orange, currency=C.gold, weapon=C.red, other=C.green}
 local function classifyLoot(name)
     local n = name:lower()
     for cat, words in pairs(LOOT_KEYWORDS) do
@@ -149,99 +125,156 @@ local function lootAnchor(v)
     return v:FindFirstChildWhichIsA("BasePart") or v.PrimaryPart
 end
 
--- AIMBOT CORE
-local screenCenter = Vector2.new(CAM.ViewportSize.X / 2, CAM.ViewportSize.Y / 2)
-
+-- ============================================================
+-- AIMBOT CORE — cached, fast, prioritised above PlayerModule
+-- ============================================================
 local function getAimbotTarget()
     local center = Vector2.new(CAM.ViewportSize.X / 2, CAM.ViewportSize.Y / 2)
     local best = nil
-    local bestDist = S.aimFOV
+    local bestScreenDist = S.aimFOV
+    local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local myPos = hrp.Position
 
-    local function consider(char)
-        local part = char:FindFirstChild(S.aimPart) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
-        if not part then return end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health <= 0 then return end
-
-        local screen, onScreen = CAM:WorldToViewportPoint(part.Position)
-        if not onScreen then return end
-        if screen.Z < 0 then return end
-
-        local d = (Vector2.new(screen.X, screen.Y) - center).Magnitude
-        if d > S.aimFOV then return end
-
-        if S.aimVisCheck then
-            local params = RaycastParams.new()
-            params.FilterType = Enum.RaycastFilterType.Exclude
-            params.FilterDescendantsInstances = {LP.Character, char}
-            local result = WS:Raycast(CAM.CFrame.Position, (part.Position - CAM.CFrame.Position).Unit * 1000, params)
-            if result then return end
-        end
-
-        if d < bestDist then
-            bestDist = d
-            best = part
-        end
-    end
+    -- pre-filter by 3D distance, then screen distance
+    local candidates = {}
 
     if S.aimPlayers then
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LP and p.Character and not isTeammate(p) then
-                consider(p.Character)
+                local root = p.Character:FindFirstChild("HumanoidRootPart")
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                if root and hum and hum.Health > 0 then
+                    local d3 = (myPos - root.Position).Magnitude
+                    if d3 <= S.aimRange then
+                        table.insert(candidates, p.Character)
+                    end
+                end
             end
         end
     end
 
     if S.aimNPCs then
         for _, npc in ipairs(NpcCache) do
-            consider(npc)
+            local root = npc:FindFirstChild("HumanoidRootPart")
+            local hum = npc:FindFirstChildOfClass("Humanoid")
+            if root and hum and hum.Health > 0 then
+                local d3 = (myPos - root.Position).Magnitude
+                if d3 <= S.aimRange then
+                    table.insert(candidates, npc)
+                end
+            end
+        end
+    end
+
+    for _, char in ipairs(candidates) do
+        local part = char:FindFirstChild(S.aimPart) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+        if part then
+            local screen, onScreen = CAM:WorldToViewportPoint(part.Position)
+            if onScreen and screen.Z > 0 then
+                local d = (Vector2.new(screen.X, screen.Y) - center).Magnitude
+                if d < bestScreenDist then
+                    if S.aimVisCheck then
+                        local params = RaycastParams.new()
+                        params.FilterType = Enum.RaycastFilterType.Exclude
+                        params.FilterDescendantsInstances = {LP.Character, char}
+                        local ray = (part.Position - CAM.CFrame.Position).Unit * (part.Position - CAM.CFrame.Position).Magnitude
+                        local result = WS:Raycast(CAM.CFrame.Position, ray, params)
+                        if not result then
+                            bestScreenDist = d
+                            best = part
+                        end
+                    else
+                        bestScreenDist = d
+                        best = part
+                    end
+                end
+            end
         end
     end
 
     return best
 end
 
-local function updateAimbot()
-    pcall(scanNPCs)
+-- target refresh (12 Hz, not 60)
+task.spawn(function()
+    while true do
+        task.wait(0.08)
+        if S.aimEnabled then
+            pcall(function()
+                cachedAimTarget = getAimbotTarget()
+            end)
+        else
+            cachedAimTarget = nil
+        end
+    end
+end)
 
+-- aim highlight (persistent, change adornee)
+aimHighlight = Instance.new("Highlight")
+aimHighlight.Name = "RJ_AimHL"
+aimHighlight.FillColor = C.green
+aimHighlight.FillTransparency = 0.5
+aimHighlight.OutlineColor = C.green
+aimHighlight.OutlineTransparency = 0
+aimHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+aimHighlight.Enabled = false
+aimHighlight.Parent = game.CoreGui
+
+-- camera write at high priority to beat PlayerModule
+RunService:BindToRenderStep("RJ_AimWrite", Enum.RenderPriority.Camera.Value + 1, function()
     if not S.aimEnabled then
-        if FOVCircle then FOVCircle.Visible = false end
+        if aimHighlight then aimHighlight.Enabled = false end
+        return
+    end
+    if not cachedAimTarget or not cachedAimTarget.Parent then
+        if aimHighlight then aimHighlight.Enabled = false end
         return
     end
 
-    if S.showFOV and FOVCircle then
-        FOVCircle.Visible = true
-        FOVCircle.Position = Vector2.new(CAM.ViewportSize.X / 2, CAM.ViewportSize.Y / 2)
-        FOVCircle.Radius = S.aimFOV
-        FOVCircle.Color = C.purple
-    elseif FOVCircle then
-        FOVCircle.Visible = false
+    -- update highlight
+    local char = cachedAimTarget.Parent
+    if aimHighlight.Adornee ~= char then
+        aimHighlight.Adornee = char
     end
+    aimHighlight.Enabled = true
 
-    local shouldAim = S.aimAlways or UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) or UIS:IsKeyDown(S.aimKeybind)
+    local shouldAim = S.aimAlways
+        or UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+        or UIS:IsKeyDown(S.aimKeybind)
     if not shouldAim then return end
 
-    local targetPart = getAimbotTarget()
-    if not targetPart then return end
-
-    local targetCF = CFrame.new(CAM.CFrame.Position, targetPart.Position)
+    local targetCF = CFrame.new(CAM.CFrame.Position, cachedAimTarget.Position)
     CAM.CFrame = CAM.CFrame:Lerp(targetCF, S.aimSmooth)
 
     if S.aimAutoFire then
-        local char = LP.Character
-        if char then
-            local tool = char:FindFirstChildOfClass("Tool")
+        local c = LP.Character
+        if c then
+            local tool = c:FindFirstChildOfClass("Tool")
             if tool then pcall(function() tool:Activate() end) end
         end
-        pcall(function()
-            local VIM = game:GetService("VirtualInputManager")
-            VIM:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-            VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-        end)
+        local VIM = game:GetService("VirtualInputManager")
+        if VIM then
+            pcall(function()
+                VIM:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+            end)
+        end
     end
-end
+end)
 
+-- ============================================================
+-- VIEW / POV — FOV override + zoom
+-- ============================================================
+RunService.RenderStepped:Connect(function()
+    if S.fovEnabled then
+        CAM.FieldOfView = S.fovValue
+    end
+end)
+
+-- ============================================================
 -- ESP
+-- ============================================================
 local function removeESP(p)
     local d = PD[p]
     if not d then return end
@@ -260,7 +293,6 @@ local function createESP(p)
     local root = getRoot(p)
     if not head or not root then return end
     local data = { char = char }
-
     if S.box then
         local hl = Instance.new("Highlight")
         hl.Adornee = char
@@ -272,7 +304,6 @@ local function createESP(p)
         hl.Parent = char
         data.hl = hl
     end
-
     local bb = Instance.new("BillboardGui")
     bb.Adornee = head
     bb.Size = UDim2.new(0, 130, 0, 46)
@@ -280,7 +311,6 @@ local function createESP(p)
     bb.AlwaysOnTop = true
     bb.Parent = head
     data.bb = bb
-
     if S.name then
         local nm = Instance.new("TextLabel", bb)
         nm.Position = UDim2.new(0, 0, 0, 0)
@@ -293,7 +323,6 @@ local function createESP(p)
         nm.TextStrokeTransparency = 0.3
         data.nameLbl = nm
     end
-
     if S.health then
         local hpBg = Instance.new("Frame", bb)
         hpBg.Position = UDim2.new(0.15, 0, 0, 18)
@@ -309,7 +338,6 @@ local function createESP(p)
         data.hpBg = hpBg
         data.hpFill = hpFill
     end
-
     if S.distance then
         local ds = Instance.new("TextLabel", bb)
         ds.Position = UDim2.new(0, 0, 0, 24)
@@ -322,7 +350,6 @@ local function createESP(p)
         ds.TextStrokeTransparency = 0.4
         data.distLbl = ds
     end
-
     if S.tracer then
         local tr = Instance.new("Frame", tracerFrame)
         tr.BackgroundColor3 = S.color
@@ -332,7 +359,6 @@ local function createESP(p)
         tr.ZIndex = 998
         data.tracer = tr
     end
-
     PD[p] = data
 end
 
@@ -352,7 +378,6 @@ local function applyStyleToAll()
     end
 end
 
--- Loot ESP
 local function removeLoot(obj)
     local d = LootCache[obj]
     if not d then return end
@@ -439,7 +464,9 @@ local function scanLoot()
     end
 end
 
--- Tracer / Watermark / Notif GUIs
+-- ============================================================
+-- Tracer/Watermark/Notif/Minimap GUIs
+-- ============================================================
 local tracerGui = Instance.new("ScreenGui")
 tracerGui.Name = "RJ_ESP_Tracers"
 tracerGui.Parent = game.CoreGui
@@ -457,7 +484,7 @@ wmGui.ResetOnSpawn = false
 wmGui.DisplayOrder = 1001
 local WM = Instance.new("Frame", wmGui)
 WM.Position = UDim2.new(0, 20, 0, 20)
-WM.Size = UDim2.new(0, 280, 0, 28)
+WM.Size = UDim2.new(0, 300, 0, 28)
 WM.BackgroundColor3 = C.bg
 WM.BackgroundTransparency = 0.15
 WM.BorderSizePixel = 0
@@ -542,7 +569,7 @@ local blur = Instance.new("BlurEffect", LT)
 blur.Size = 0
 blur.Enabled = false
 
--- Ghostface
+-- Ghostface draw
 local function drawGhostface(container, size)
     local face = Instance.new("Frame", container)
     face.Size = UDim2.new(0, size, 0, math.floor(size * 1.15))
@@ -581,6 +608,7 @@ local function drawGhostface(container, size)
     return face
 end
 
+-- Mini ghost
 local miniGui = Instance.new("ScreenGui")
 miniGui.Name = "RJ_ESP_Mini"
 miniGui.Parent = game.CoreGui
@@ -603,8 +631,7 @@ mgStroke.Transparency = 0.3
 drawGhostface(MiniGhost, 32)
 
 local miniDrag = false
-local miniStart
-local miniStartPos
+local miniStart, miniStartPos
 MiniGhost.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         miniDrag = true
@@ -754,13 +781,10 @@ CloseBtn.TextSize = 16
 CloseBtn.AutoButtonColor = false
 Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
 CloseBtn.MouseButton1Click:Connect(function()
-    gui:Destroy()
-    wmGui:Destroy()
-    notifGui:Destroy()
-    tracerGui:Destroy()
-    miniGui:Destroy()
-    blur:Destroy()
-    if FOVCircle then FOVCircle:Remove() end
+    gui:Destroy() wmGui:Destroy() notifGui:Destroy() tracerGui:Destroy() miniGui:Destroy() blur:Destroy()
+    if FOVCircle then pcall(function() FOVCircle:Remove() end) end
+    if aimHighlight then aimHighlight:Destroy() end
+    pcall(function() RunService:UnbindFromRenderStep("RJ_AimWrite") end)
 end)
 
 local Side = Instance.new("Frame", Main)
@@ -814,7 +838,7 @@ MiniGhost.MouseButton1Click:Connect(function()
     if not miniDrag then restoreFromGhost() end
 end)
 
--- UI BUILDERS
+-- UI Builders
 local Tabs = {}
 local function newTab(name, icon, order)
     local page = Instance.new("ScrollingFrame", Content)
@@ -835,8 +859,8 @@ local function newTab(name, icon, order)
     pad.PaddingLeft = UDim.new(0, 4)
     pad.PaddingRight = UDim.new(0, 8)
     local btn = Instance.new("TextButton", Side)
-    btn.Size = UDim2.new(1, -16, 0, 38)
-    btn.Position = UDim2.new(0, 8, 0, order * 44 + 10)
+    btn.Size = UDim2.new(1, -16, 0, 36)
+    btn.Position = UDim2.new(0, 8, 0, order * 42 + 8)
     btn.BackgroundColor3 = C.bg
     btn.BorderSizePixel = 0
     btn.Font = FS
@@ -847,14 +871,10 @@ local function newTab(name, icon, order)
     btn.AutoButtonColor = false
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
     btn.MouseEnter:Connect(function()
-        if not page.Visible then
-            TW:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = C.panel}):Play()
-        end
+        if not page.Visible then TW:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = C.panel}):Play() end
     end)
     btn.MouseLeave:Connect(function()
-        if not page.Visible then
-            TW:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = C.bg}):Play()
-        end
+        if not page.Visible then TW:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = C.bg}):Play() end
     end)
     btn.MouseButton1Click:Connect(function()
         for _, t in pairs(Tabs) do
@@ -990,34 +1010,30 @@ local function slider(p, label, mn, mx, dflt, y, cb)
     end
     bar.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            drag = true
-            update(i)
+            drag = true update(i)
         end
     end)
     UIS.InputChanged:Connect(function(i) if drag then update(i) end end)
     UIS.InputEnded:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            drag = false
-        end
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then drag = false end
     end)
 end
 
--- TABS
+-- Tabs
 local ESPT = newTab("ESP", "◉", 0)
 local PlayersT = newTab("Players", "◈", 1)
 local LootT = newTab("Loot", "◆", 2)
 local AimT = newTab("Aimbot", "◎", 3)
-local StyleT = newTab("Style", "✦", 4)
-local SettingsT = newTab("Settings", "◍", 5)
+local ViewT = newTab("View", "▣", 4)
+local StyleT = newTab("Style", "✦", 5)
+local SettingsT = newTab("Settings", "◍", 6)
 
--- ESP tab
+-- ESP
 section(ESPT, "Master", 0)
 toggle(ESPT, "Enable ESP", "enabled", 24, function(v)
     if v then
-        notify("ESP Enabled", "Scanning players...")
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LP then pcall(createESP, p) end
-        end
+        notify("ESP ON", "Scanning players...")
+        for _, p in ipairs(Players:GetPlayers()) do if p ~= LP then pcall(createESP, p) end end
     else
         for p, _ in pairs(PD) do removeESP(p) end
     end
@@ -1031,12 +1047,10 @@ toggle(ESPT, "Tracer Lines", "tracer", 282, function() for p, _ in pairs(PD) do 
 section(ESPT, "Filters", 332)
 toggle(ESPT, "Team Check", "teamCheck", 356, function()
     for p, _ in pairs(PD) do removeESP(p) end
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP and S.enabled then pcall(createESP, p) end
-    end
+    for _, p in ipairs(Players:GetPlayers()) do if p ~= LP and S.enabled then pcall(createESP, p) end end
 end)
 
--- Players tab
+-- Players
 local listCount = Instance.new("TextLabel", PlayersT)
 listCount.BackgroundTransparency = 1
 listCount.Position = UDim2.new(0, 0, 0, 0)
@@ -1121,7 +1135,7 @@ local function buildRow(p)
     d.rowFill = hpFill
 end
 
--- Loot tab
+-- Loot
 section(LootT, "See Through Walls", 0)
 toggle(LootT, "Enable Loot Vision", "lootEnabled", 24, function(v)
     if v then notify("Loot ON", "Scanning...") else
@@ -1178,12 +1192,13 @@ button(LootT, "DEBUG — PRINT NAMES", 280, function()
     notify("Debug", "Printed " .. #found .. " objects (check console)")
 end, true)
 
--- AIMBOT tab
+-- Aimbot
 section(AimT, "Master", 0)
 toggle(AimT, "Enable Aimbot", "aimEnabled", 24, function(v)
-    if v then notify("Aimbot ON", "Auto-aiming nearest target")
+    if v then notify("Aimbot ON", "Auto-locking nearest target")
     else
         notify("Aimbot OFF", "")
+        if aimHighlight then aimHighlight.Enabled = false end
         if FOVCircle then FOVCircle.Visible = false end
     end
 end)
@@ -1191,9 +1206,9 @@ end)
 section(AimT, "Targets", 74)
 toggle(AimT, "Aim Players", "aimPlayers", 98)
 toggle(AimT, "Aim NPCs", "aimNPCs", 134)
-toggle(AimT, "Visibility Check (skip behind walls)", "aimVisCheck", 170)
-toggle(AimT, "Always Aim (no key needed)", "aimAlways", 206)
-toggle(AimT, "Auto Fire (fires weapon)", "aimAutoFire", 242)
+toggle(AimT, "Visibility Check", "aimVisCheck", 170)
+toggle(AimT, "Always Aim (no key)", "aimAlways", 206)
+toggle(AimT, "Auto Fire", "aimAutoFire", 242)
 
 section(AimT, "Field of View", 294)
 toggle(AimT, "Show FOV Circle", "showFOV", 318)
@@ -1201,27 +1216,86 @@ slider(AimT, "FOV Size", 50, 600, S.aimFOV, 362, function(v)
     S.aimFOV = v
     if FOVCircle then FOVCircle.Radius = v end
 end)
+slider(AimT, "Max Range (studs)", 100, 5000, S.aimRange, 422, function(v) S.aimRange = v end)
 
-section(AimT, "Smoothness", 434)
-slider(AimT, "Aim Smoothness", 0.05, 0.8, S.aimSmooth, 458, function(v)
-    S.aimSmooth = v
-end)
+section(AimT, "Smoothness", 482)
+slider(AimT, "Aim Smoothness", 0.05, 0.8, S.aimSmooth, 506, function(v) S.aimSmooth = v end)
 
-section(AimT, "Debug", 520)
-button(AimT, "TEST — COUNT NPCs", 544, function()
+section(AimT, "Debug", 568)
+button(AimT, "TEST — COUNT NPCs", 592, function()
     scanNPCs()
     print("=== NPC SCAN ===")
-    print("NPCs found:", #NpcCache)
+    print("Total NPCs:", #NpcCache)
+    local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local inRange = 0
+        for _, npc in ipairs(NpcCache) do
+            local r = npc:FindFirstChild("HumanoidRootPart")
+            if r and (hrp.Position - r.Position).Magnitude <= S.aimRange then
+                inRange = inRange + 1
+            end
+        end
+        print("In aim range:", inRange)
+    end
+    print("Current target:", cachedAimTarget and cachedAimTarget.Parent.Name or "NONE")
     for i, npc in ipairs(NpcCache) do
-        if i > 15 then print("... and " .. (#NpcCache - 15) .. " more") break end
+        if i > 10 then print("... and " .. (#NpcCache - 10) .. " more") break end
         local hum = npc:FindFirstChildOfClass("Humanoid")
-        print(i .. ". " .. npc.Name .. " | HP:" .. math.floor(hum and hum.Health or 0) .. " | Parent: " .. (npc.Parent and npc.Parent.Name or "?"))
+        print(i .. ". " .. npc.Name .. " | HP:" .. math.floor(hum and hum.Health or 0))
     end
     print("=== END ===")
-    notify("NPC Count", #NpcCache .. " NPCs in range")
+    notify("NPC Count", #NpcCache .. " NPCs cached")
 end, true)
 
--- Style tab
+-- View / POV
+section(ViewT, "Field of View (FOV)", 0)
+toggle(ViewT, "Enable FOV Override", "fovEnabled", 24, function(v)
+    if not v then CAM.FieldOfView = 70 end
+    notify("FOV " .. (v and "ON" or "OFF"), v and ("FOV: " .. S.fovValue) or "Reset to 70")
+end)
+slider(ViewT, "FOV Value", 40, 120, S.fovValue, 68, function(v)
+    S.fovValue = v
+    if S.fovEnabled then CAM.FieldOfView = v end
+end)
+section(ViewT, "Camera Zoom", 128)
+toggle(ViewT, "Enable Zoom Override", "zoomEnabled", 152, function(v)
+    if v then
+        LP.CameraMaxZoomDistance = S.zoomDist
+        LP.CameraMinZoomDistance = S.minZoom
+    else
+        LP.CameraMaxZoomDistance = 128
+        LP.CameraMinZoomDistance = 0.5
+    end
+end)
+slider(ViewT, "Max Zoom Distance", 12, 200, S.zoomDist, 196, function(v)
+    S.zoomDist = v
+    if S.zoomEnabled then LP.CameraMaxZoomDistance = v end
+end)
+slider(ViewT, "Min Zoom (0 = first person)", 0, 12, S.minZoom, 256, function(v)
+    S.minZoom = v
+    if S.zoomEnabled then LP.CameraMinZoomDistance = v end
+end)
+section(ViewT, "Presets", 316)
+button(ViewT, "WIDE (FOV 100 + Zoom 50)", 340, function()
+    S.fovValue = 100
+    S.fovEnabled = true
+    CAM.FieldOfView = 100
+    S.zoomDist = 50
+    S.zoomEnabled = true
+    LP.CameraMaxZoomDistance = 50
+    notify("Wide View", "FOV 100 · Zoom 50")
+end, true)
+button(ViewT, "DEFAULT", 384, function()
+    S.fovValue = 70
+    S.fovEnabled = false
+    CAM.FieldOfView = 70
+    S.zoomDist = 12
+    S.zoomEnabled = false
+    LP.CameraMaxZoomDistance = 128
+    notify("Reset", "Default view")
+end)
+
+-- Style
 section(StyleT, "ESP Color", 0)
 local swatchRow = Instance.new("Frame", StyleT)
 swatchRow.Position = UDim2.new(0, 0, 0, 24)
@@ -1271,7 +1345,7 @@ slider(StyleT, "Text Size", 8, 20, S.textSize, 222, function(v)
 end)
 slider(StyleT, "Max Distance", 100, 5000, S.maxDist, 282, function(v) S.maxDist = v end)
 
--- Settings tab
+-- Settings
 section(SettingsT, "System", 0)
 toggle(SettingsT, "Anti-AFK", "antiAfk", 24)
 toggle(SettingsT, "Full Bright", "fullBright", 70, function(v)
@@ -1291,15 +1365,18 @@ button(SettingsT, "RESET ALL", 146, function()
     S.lootEnabled = false
     S.aimEnabled = false
     if FOVCircle then FOVCircle.Visible = false end
+    if aimHighlight then aimHighlight.Enabled = false end
     notify("Reset", "All cleared")
 end)
 button(SettingsT, "HIDE TO GHOSTFACE", 190, minimizeToGhost)
 button(SettingsT, "DESTROY UI", 234, function()
     gui:Destroy() wmGui:Destroy() notifGui:Destroy() tracerGui:Destroy() miniGui:Destroy() blur:Destroy()
-    if FOVCircle then FOVCircle:Remove() end
+    if FOVCircle then pcall(function() FOVCircle:Remove() end) end
+    if aimHighlight then aimHighlight:Destroy() end
+    pcall(function() RunService:UnbindFromRenderStep("RJ_AimWrite") end)
 end)
 
--- LOOPS
+-- Loops
 local frameCount, lastFps, fps = 0, 0, 0
 RunService.RenderStepped:Connect(function()
     frameCount = frameCount + 1
@@ -1363,7 +1440,7 @@ RunService.RenderStepped:Connect(function()
         end
     end
     listCount.Text = count .. " players tracked"
-    sText.Text = "[" .. (S.enabled and "active" or "idle") .. "] · " .. count .. "p · NPCs:" .. #NpcCache
+    sText.Text = "[" .. (S.enabled and "active" or "idle") .. "] · " .. count .. "p · NPCs:" .. #NpcCache .. (cachedAimTarget and " · TARGET:" .. cachedAimTarget.Parent.Name or "")
 end)
 
 RunService.Heartbeat:Connect(function()
@@ -1392,7 +1469,7 @@ pcall(function()
         FOVCircle.NumSides = 60
         FOVCircle.Radius = S.aimFOV
         FOVCircle.Filled = false
-        FOVCircle.Transparency = 0.6
+        FOVCircle.Transparency = 0.7
         FOVCircle.Color = C.purple
         FOVCircle.Visible = false
         FOVCircle.ZIndex = 999
@@ -1409,7 +1486,6 @@ RunService.RenderStepped:Connect(function()
             FOVCircle.Visible = false
         end
     end
-    pcall(updateAimbot)
 end)
 
 task.spawn(function()
@@ -1467,4 +1543,4 @@ Tabs["ESP"].Btn.BackgroundColor3 = C.panel2
 Tabs["ESP"].Btn.TextColor3 = C.purple
 
 task.wait(0.3)
-notify("RedJ03N ESP Pro", "Loaded · aimbot fixed")
+notify("RedJ03N ESP Pro", "Loaded · aimbot fixed · View tab added")
